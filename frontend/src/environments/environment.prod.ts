@@ -1,6 +1,6 @@
 export const environment = {
   production: true,
-  apiUrl: '',  // Set to your Railway backend URL when deploying
+  apiUrl: 'https://aipartnerdetector-back-production.up.railway.app',  // Set to your Railway backend URL when deploying
   appName: 'AI Partner Matching/Duplicate Detector',
   primaryColor: '#7ab800',
   maxFileSize: 10 * 1024 * 1024,

@@ -17,7 +17,7 @@ export class InstitutionService {
    * Otherwise use the configured backend URL
    */
   private getApiUrl(): string {
-    const backendUrl = environment.apiUrl;
+    const apiUrl = environment.apiUrl;
     
     // If we're on localhost, use localhost:8000
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
@@ -25,7 +25,7 @@ export class InstitutionService {
     }
     
     // Otherwise use the configured backend URL
-    return `${backendUrl}/institutions`;
+    return `${apiUrl}/institutions`;
   }
 
   generateEmbeddings(): Observable<any> {
