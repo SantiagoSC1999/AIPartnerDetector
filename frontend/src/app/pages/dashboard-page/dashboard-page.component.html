@@ -1,0 +1,59 @@
+<div class="dashboard-page">
+  <div class="page-header">
+    <h1>Dashboard</h1>
+    <button (click)="refreshData()" class="btn btn-primary">🔄 Refresh</button>
+  </div>
+
+  <div *ngIf="error" class="alert alert-error">
+    <strong>Error:</strong> {{ error }}
+  </div>
+
+  <div *ngIf="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Loading dashboard...</p>
+  </div>
+
+  <div *ngIf="!loading" class="dashboard-grid">
+    <div class="stat-card">
+      <div class="stat-label">Total Institutions</div>
+      <div class="stat-value">{{ stats.institutions_count }}</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">Embeddings Generated</div>
+      <div class="stat-value">{{ stats.embeddings_count }}</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">Countries</div>
+      <div class="stat-value">{{ stats.countries_count }}</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-label">Last Sync</div>
+      <div class="stat-value">{{ stats.last_sync || 'Never' }}</div>
+    </div>
+  </div>
+
+  <div *ngIf="!loading" class="health-section">
+    <h2>System Health</h2>
+    <div class="health-card" [class.healthy]="health.status === 'ok'">
+      <div class="health-status">{{ health.status }}</div>
+      <div class="health-message">{{ health.message }}</div>
+    </div>
+  </div>
+
+  <!-- Embeddings Generation Section -->
+  <div *ngIf="!loading" class="embeddings-section">
+    <div class="embeddings-card">
+      <h2>Embeddings</h2>
+      <p>Generate or update institution embeddings for duplicate detection.</p>
+      <button class="btn btn-primary" (click)="generateEmbeddings()" [disabled]="generatingEmbeddings">
+        <span *ngIf="generatingEmbeddings" class="spinner spinner-inline"></span>
+        <span *ngIf="!generatingEmbeddings">⚡ Generate Embeddings</span>
+        <span *ngIf="generatingEmbeddings">Generating...</span>
+      </button>
+      <div *ngIf="embeddingsMessage" class="embeddings-message">{{ embeddingsMessage }}</div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,43 @@
+<div class="sync-page">
+  <div class="page-header">
+    <h1>Database Sync Status</h1>
+    <button (click)="triggerSync()" class="btn btn-primary" [disabled]="syncing">
+      {{ syncing ? '🔄 Syncing...' : '🔄 Trigger Sync' }}
+    </button>
+  </div>
+
+  <div *ngIf="error" class="alert alert-error">
+    <strong>Error:</strong> {{ error }}
+  </div>
+
+  <div *ngIf="success" class="alert alert-success">
+    <strong>Success:</strong> {{ success }}
+  </div>
+
+  <div *ngIf="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Loading sync status...</p>
+  </div>
+
+  <div *ngIf="!loading" class="status-grid">
+    <div class="status-card">
+      <div class="status-label">Total Institutions</div>
+      <div class="status-value">{{ syncStatus.institutions_count }}</div>
+    </div>
+
+    <div class="status-card">
+      <div class="status-label">Countries</div>
+      <div class="status-value">{{ syncStatus.countries_count }}</div>
+    </div>
+
+    <div class="status-card">
+      <div class="status-label">Embeddings Generated</div>
+      <div class="status-value">{{ syncStatus.embeddings_count }}</div>
+    </div>
+
+    <div class="status-card">
+      <div class="status-label">Last Sync</div>
+      <div class="status-value small">{{ syncStatus.last_sync || 'Never' }}</div>
+    </div>
+  </div>
+</div>

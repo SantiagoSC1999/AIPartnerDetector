@@ -1,0 +1,53 @@
+<div class="settings-page">
+  <div class="page-header">
+    <h1>Settings</h1>
+    <p class="subtitle">System configuration and thresholds</p>
+  </div>
+
+  <div *ngIf="error" class="alert alert-error">
+    <strong>Error:</strong> {{ error }}
+  </div>
+
+  <div *ngIf="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Loading settings...</p>
+  </div>
+
+  <div *ngIf="!loading" class="settings-container">
+    <div class="settings-card">
+      <h2>Threshold Configuration</h2>
+      
+      <div class="setting-item">
+        <div class="setting-label">
+          <span class="label-text">Exact Match Threshold</span>
+          <span class="label-description">Similarity score for exact matches</span>
+        </div>
+        <div class="setting-value">{{ config.exact_match_threshold }}</div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label">
+          <span class="label-text">Duplicate Threshold</span>
+          <span class="label-description">Similarity score for definite duplicates</span>
+        </div>
+        <div class="setting-value">{{ config.duplicate_threshold }}</div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label">
+          <span class="label-text">Potential Duplicate Threshold</span>
+          <span class="label-description">Similarity score for potential duplicates</span>
+        </div>
+        <div class="setting-value">{{ config.potential_duplicate_threshold }}</div>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-label">
+          <span class="label-text">Embedding Batch Size</span>
+          <span class="label-description">Number of embeddings to process in batch</span>
+        </div>
+        <div class="setting-value">{{ config.embedding_batch_size }}</div>
+      </div>
+    </div>
+  </div>
+</div>

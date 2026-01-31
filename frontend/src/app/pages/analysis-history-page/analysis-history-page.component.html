@@ -1,0 +1,46 @@
+<div class="analysis-history-page">
+  <div class="page-header">
+    <h1>Analysis History</h1>
+  </div>
+
+  <div *ngIf="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Loading analysis history...</p>
+  </div>
+
+  <div *ngIf="error" class="alert alert-error">
+    {{ error }}
+  </div>
+
+  <div *ngIf="!loading && analyses.length > 0" class="history-list">
+    <table>
+      <thead>
+        <tr>
+          <th>File ID</th>
+          <th>Date</th>
+          <th>Total Records</th>
+          <th>Duplicates</th>
+          <th>Potential</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let analysis of analyses">
+          <td>{{ analysis.file_id }}</td>
+          <td>{{ analysis.date || '-' }}</td>
+          <td>{{ analysis.total_records }}</td>
+          <td>{{ analysis.duplicates }}</td>
+          <td>{{ analysis.potential_duplicates }}</td>
+          <td>
+            <button class="btn btn-primary" (click)="viewAnalysis(analysis.file_id)">View</button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div *ngIf="!loading && analyses.length === 0" class="no-results">
+    <div class="no-results-icon">📭</div>
+    <h2>No analysis found</h2>
+  </div>
+</div>

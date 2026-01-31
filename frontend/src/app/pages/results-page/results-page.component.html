@@ -1,0 +1,163 @@
+<div class="results-page">
+  <!-- Loading State -->
+  <div *ngIf="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Loading analysis results...</p>
+  </div>
+
+  <!-- Results Display -->
+  <ng-container *ngIf="!loading && analysisResults">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1>📊 Analysis Results</h1>
+        <p class="subtitle">Review duplicate detection results for your institutions</p>
+      </div>
+      <button (click)="backToUpload()" class="btn btn-secondary">← Back to Upload</button>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="results-summary">
+      <div class="summary-card">
+        <div class="summary-label">Total Records</div>
+        <div class="summary-value">{{ analysisResults.total_records }}</div>
+      </div>
+
+      <div class="summary-card duplicate">
+        <div class="summary-label">Duplicates</div>
+        <div class="summary-value">{{ analysisResults.progress.duplicates }}</div>
+      </div>
+
+      <div class="summary-card potential">
+        <div class="summary-label">Potential Duplicates</div>
+        <div class="summary-value">{{ analysisResults.progress.potential_duplicates }}</div>
+      </div>
+
+      <div class="summary-card no-match">
+        <div class="summary-label">No Match</div>
+        <div class="summary-value">
+          {{ analysisResults.total_records - analysisResults.progress.duplicates - analysisResults.progress.potential_duplicates }}
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters Bar -->
+    <div class="filters-bar">
+      <div class="filter-group">
+        <label>Filter by status:</label>
+        <select [(ngModel)]="currentFilter" (change)="setFilter(currentFilter)">
+          <option value="all">All Records</option>
+          <option value="duplicate">Duplicates Only</option>
+          <option value="potential_duplicate">Potential Duplicates Only</option>
+          <option value="no_match">No Match Only</option>
+        </select>
+      </div>
+
+      <div class="search-box">
+        <input
+          type="text"
+          [(ngModel)]="searchQuery"
+          placeholder="Search by name, acronym, or ID..."
+        >
+      </div>
+
+      <button (click)="exportToCSV()" class="btn btn-outline" title="Export to CSV">
+        📥 Export CSV
+      </button>
+    </div>
+
+    <!-- Table Legend and Help -->
+    <div class="table-legend">
+      <div class="legend-row">
+        <span class="legend-title">Legend:</span>
+        <span class="legend-item"><span class="status-badge duplicate">🔴 Duplicate</span> <span class="legend-desc">= Exact or high similarity with CLARISA</span></span>
+        <span class="legend-item"><span class="status-badge potential">🟡 Potential</span> <span class="legend-desc">= Possible match, review needed</span></span>
+        <span class="legend-item"><span class="status-badge no-match">🟢 No Match</span> <span class="legend-desc">= No similar institution found</span></span>
+      </div>
+      <div class="legend-row">
+        <span class="legend-title">Similarity:</span>
+        <span class="legend-item"><span class="similarity-score high">≥ 85%</span></span>
+        <span class="legend-item"><span class="similarity-score medium">75-84%</span></span>
+        <span class="legend-item"><span class="similarity-score low">&lt; 75%</span></span>
+      </div>
+      <div class="legend-row legend-help">
+        <span>Hover status or similarity for details.</span>
+        <span><b>Click column headers</b> to sort (coming soon).</span>
+      </div>
+    </div>
+
+    <!-- Results Table -->
+    <div class="results-table-container">
+      <table *ngIf="paginatedResults.length > 0">
+        <thead>
+          <tr>
+            <th title="Unique identifier from your file">ID</th>
+            <th title="Institution name from your file">Institution Name</th>
+            <th title="Acronym from your file">Acronym</th>
+            <th title="Duplicate status detected">Status</th>
+            <th title="Similarity score with CLARISA">Similarity</th>
+            <th title="Matched CLARISA institution ID">CLARISA Match</th>
+            <th title="Reason for match or no match">Reason</th>
+            <th title="Web page from your file">Web Page</th>
+            <th title="Institution type from your file">Type</th>
+            <th title="Country code from your file">Country</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let result of paginatedResults">
+            <td><strong [ngClass]="{'has-data': result.original_data.partner_name || result.original_data.acronym}">{{ result.id || '-' }}</strong></td>
+            <td>{{ result.original_data.partner_name || '-' }}</td>
+            <td><code *ngIf="result.original_data.acronym; else noAcronym">{{ result.original_data.acronym }}</code><ng-template #noAcronym>-</ng-template></td>
+            <td>
+              <span class="status-badge" [ngClass]="getStatusBadgeClass(result.status)" [title]="getStatusLabel(result.status)">
+                {{ getStatusLabel(result.status) }}
+              </span>
+            </td>
+            <td>
+              <span
+                class="similarity-score"
+                [ngClass]="result.similarity_score ? (result.similarity_score >= 0.85 ? 'high' : result.similarity_score >= 0.75 ? 'medium' : 'low') : ''"
+                [title]="result.similarity_score ? (result.similarity_score * 100).toFixed(1) + '%' : '-'"
+              >
+                {{ result.similarity_score !== undefined && result.similarity_score !== null ? (result.similarity_score * 100).toFixed(1) + '%' : '-' }}
+              </span>
+            </td>
+            <td>{{ result.matched_clarisa_id || '-' }}</td>
+            <td>{{ result.reason || '-' }}</td>
+            <td>
+              <a *ngIf="result.original_data.web_page" [href]="result.original_data.web_page" target="_blank" rel="noopener">🌐</a>
+              <span *ngIf="!result.original_data.web_page">-</span>
+            </td>
+            <td>{{ result.original_data.institution_type || '-' }}</td>
+            <td>{{ result.original_data.country_id || '-' }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div *ngIf="paginatedResults.length === 0" class="no-results">
+        <div class="no-results-icon">📭</div>
+        <h2>No results found</h2>
+        <p>Try adjusting your filters or search criteria</p>
+      </div>
+    </div>
+
+    <!-- Pagination -->
+    <div *ngIf="totalPages > 1" class="pagination">
+      <button
+        *ngFor="let page of [1, 2, 3]"
+        (click)="goToPage(page)"
+        [class.active]="page === currentPage"
+        [disabled]="page > totalPages"
+      >
+        {{ page }}
+      </button>
+      <span *ngIf="totalPages > 3">... ({{ totalPages }} pages)</span>
+    </div>
+
+    <!-- Export Actions -->
+    <div class="export-actions">
+      <button (click)="exportToCSV()" class="btn btn-primary">📥 Download Results as CSV</button>
+      <button (click)="backToUpload()" class="btn btn-outline">Upload Another File</button>
+    </div>
+  </ng-container>
+</div>

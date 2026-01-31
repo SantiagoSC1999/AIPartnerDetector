@@ -1,0 +1,57 @@
+<div class="analysis-detail-page">
+  <div class="page-header">
+    <h1>Analysis Detail</h1>
+    <div class="file-id">File ID: {{ fileId }}</div>
+  </div>
+
+  <div *ngIf="loading" class="loading">
+    <div class="spinner"></div>
+    <p>Loading analysis detail...</p>
+  </div>
+
+  <div *ngIf="error" class="alert alert-error">
+    {{ error }}
+  </div>
+
+  <div *ngIf="!loading && analysis" class="detail-table">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Institution Name</th>
+          <th>Acronym</th>
+          <th>Status</th>
+          <th>Similarity</th>
+          <th>CLARISA Match</th>
+          <th>Reason</th>
+          <th>Web Page</th>
+          <th>Type</th>
+          <th>Country</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let result of analysis.records">
+          <td>{{ result.uploaded_id || '-' }}</td>
+          <td>{{ result.institution_name || '-' }}</td>
+          <td>{{ result.acronym || '-' }}</td>
+          <td>{{ result.status || '-' }}</td>
+          <td>{{ result.similarity !== undefined && result.similarity !== null ? (result.similarity * 100).toFixed(1) + '%' : '-' }}</td>
+          <td>{{ result.clarisa_match || '-' }}</td>
+          <td>{{ result.reason || '-' }}</td>
+          <td>
+            <a *ngIf="result.web_page" [href]="result.web_page" target="_blank" rel="noopener">🌐</a>
+            <span *ngIf="!result.web_page">-</span>
+          </td>
+          <td>{{ result.type || '-' }}</td>
+          <td>{{ result.country || '-' }}</td>
+          <td>{{ result.country_name || '-' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div *ngIf="!loading && (!analysis || !analysis.results?.length)" class="no-results">
+    <div class="no-results-icon">📭</div>
+    <h2>No results found</h2>
+  </div>
+</div>

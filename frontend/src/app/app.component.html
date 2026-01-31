@@ -1,0 +1,10 @@
+<div class="app-container">
+  <app-header (toggleSidebar)="toggleSidebar()"></app-header>
+  <div class="app-body">
+    <app-sidebar [(open)]="sidebarOpen"></app-sidebar>
+    <main class="app-main">
+      <router-outlet></router-outlet>
+    </main>
+  </div>
+  <app-footer></app-footer>
+</div>

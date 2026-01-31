@@ -1,0 +1,101 @@
+<div class="upload-page">
+  <div class="page-header">
+    <div>
+      <h1>📤 Upload Excel File</h1>
+      <p class="subtitle">Upload an Excel file to detect duplicate institutions in CLARISA</p>
+    </div>
+  </div>
+
+  <div *ngIf="error" class="alert alert-error">
+    <strong>⚠️ Error:</strong> {{ error }}
+  </div>
+
+  <div *ngIf="success" class="alert alert-success">
+    <strong>✅ Success:</strong> {{ success }}
+  </div>
+
+  <div class="upload-container">
+    <!-- Requirements Card -->
+    <div class="requirements-card">
+      <div class="requirements-header">
+        <h3>📋 Requirements</h3>
+        <p class="requirements-subtitle">Your Excel file must contain these columns</p>
+      </div>
+      
+      <ul class="requirements-list">
+        <li><span class="requirement-icon">✓</span> <span class="requirement-name">id</span></li>
+        <li><span class="requirement-icon">✓</span> <span class="requirement-name">partner_name</span></li>
+        <li><span class="requirement-icon">✓</span> <span class="requirement-name">acronym</span></li>
+        <li><span class="requirement-icon">✓</span> <span class="requirement-name">web_page</span></li>
+        <li><span class="requirement-icon">✓</span> <span class="requirement-name">institution_type</span></li>
+        <li><span class="requirement-icon">✓</span> <span class="requirement-name">country_id</span></li>
+      </ul>
+
+      <div class="file-restrictions">
+        <p><strong>Max file size:</strong> 10 MB</p>
+        <p><strong>Formats:</strong> .xlsx, .xls</p>
+      </div>
+    </div>
+
+    <!-- Upload Card -->
+    <div class="upload-card">
+      <!-- Upload Area -->
+      <div class="upload-area"
+           (dragover)="onDragOver($event)"
+           (dragleave)="onDragLeave()"
+           (drop)="onDrop($event)"
+           [class.drag-over]="dragOver">
+        <div class="upload-content">
+          <div class="upload-icon">📁</div>
+          <h2>Drag & drop your Excel file</h2>
+          <p class="upload-separator">or</p>
+          <label class="file-input-label">
+            <span class="btn btn-primary">Browse Files</span>
+            <input type="file" accept=".xlsx,.xls" (change)="onFileSelected($event)" hidden>
+          </label>
+          <p class="upload-hint">Supported: .xlsx, .xls</p>
+        </div>
+      </div>
+
+      <!-- Selected File -->
+      <div *ngIf="selectedFile" class="selected-file">
+        <div class="file-info">
+          <div class="file-icon-wrapper">
+            <span class="file-icon">📄</span>
+          </div>
+          <div class="file-details">
+            <div class="file-name">{{ selectedFile.name }}</div>
+            <div class="file-size">{{ (selectedFile.size / 1024).toFixed(2) }} KB</div>
+          </div>
+          <button class="remove-btn" (click)="selectedFile = null">✕</button>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div *ngIf="uploading" class="progress-container">
+        <div class="progress-label">
+          <span>Uploading file...</span>
+          <span class="progress-current">{{ uploadProgress }}%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" [style.width.%]="uploadProgress"></div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="upload-actions">
+        <button (click)="uploadFile()" 
+                class="btn btn-primary"
+                [disabled]="!selectedFile || uploading">
+          <span *ngIf="!uploading">🚀 Upload File</span>
+          <span *ngIf="uploading">⏳ Uploading...</span>
+        </button>
+        <button *ngIf="selectedFile && !uploading"
+                (click)="selectedFile = null" 
+                class="btn btn-secondary">
+          Clear
+        </button>
+      </div>
+    </div>
+  </div>
+</div>

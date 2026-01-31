@@ -1,0 +1,11 @@
+<div class="sidebar-backdrop" [class.open]="open && isMobile()" (click)="closeSidebar()"></div>
+<nav class="sidebar" [class.open]="open">
+  <ul class="menu">
+    <li *ngFor="let item of menuItems" class="menu-item">
+      <a [routerLink]="item.route" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }" (click)="onMenuClick()">
+        <span class="icon">{{ item.icon }}</span>
+        <span class="label">{{ item.label }}</span>
+      </a>
+    </li>
+  </ul>
+</nav>
