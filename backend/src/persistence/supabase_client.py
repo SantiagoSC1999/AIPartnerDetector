@@ -35,7 +35,7 @@ class SupabaseClient:
         else:
             self.client = None
 
-    async def upsert_country(self, country_data: Dict[str, Any]) -> Optional[int]:
+    def upsert_country(self, country_data: Dict[str, Any]) -> Optional[int]:
         """Upsert a country into the countries table."""
         if self.use_mock:
             # Mock: return a deterministic ID based on country code
@@ -61,7 +61,7 @@ class SupabaseClient:
             logger.error(f"Error upserting country: {str(e)}")
             return None
 
-    async def upsert_clarisa_institution(
+    def upsert_clarisa_institution(
         self,
         institution_data: Dict[str, Any],
         country_id: Optional[int] = None
@@ -94,7 +94,7 @@ class SupabaseClient:
             logger.error(f"Error upserting institution: {str(e)}")
             return None
 
-    async def upsert_institution_embedding(
+    def upsert_institution_embedding(
         self,
         institution_id: int,
         embedding_text: str,
@@ -128,49 +128,49 @@ class SupabaseClient:
             logger.error(f"Error upserting embedding: {str(e)}")
             return None
 
-    async def get_institutions_count(self) -> int:
+    def get_institutions_count(self) -> int:
         """Get total count of institutions."""
         if self.use_mock:
             return 0
 
         try:
             response = self.client.table("clarisa_institutions").select(
-                "count", count="exact"
+                "*", count="exact"
             ).execute()
             return response.count or 0
         except Exception as e:
             logger.error(f"Error getting institutions count: {str(e)}")
             return 0
 
-    async def get_countries_count(self) -> int:
+    def get_countries_count(self) -> int:
         """Get total count of countries."""
         if self.use_mock:
             return 0
 
         try:
             response = self.client.table("countries").select(
-                "count", count="exact"
+                "*", count="exact"
             ).execute()
             return response.count or 0
         except Exception as e:
             logger.error(f"Error getting countries count: {str(e)}")
             return 0
 
-    async def get_embeddings_count(self) -> int:
+    def get_embeddings_count(self) -> int:
         """Get total count of embeddings."""
         if self.use_mock:
             return 0
 
         try:
             response = self.client.table("institution_embeddings").select(
-                "count", count="exact"
+                "*", count="exact"
             ).execute()
             return response.count or 0
         except Exception as e:
             logger.error(f"Error getting embeddings count: {str(e)}")
             return 0
 
-    async def get_clarisa_institutions(self) -> List[Dict[str, Any]]:
+    def get_clarisa_institutions(self) -> List[Dict[str, Any]]:
         """Get all CLARISA institutions WITH their pre-generated embeddings for duplicate detection.
         
         Uses batch pagination to fetch all 10k+ institutions and embeddings.
@@ -261,7 +261,7 @@ class SupabaseClient:
             logger.error(f"Error getting CLARISA institutions: {str(e)}", exc_info=True)
             return []
 
-    async def get_institutions_without_embeddings(self) -> List[Dict[str, Any]]:
+    def get_institutions_without_embeddings(self) -> List[Dict[str, Any]]:
         """Get institutions that don't have embeddings yet.
         
         This efficiently finds all institutions that don't have embeddings
@@ -358,7 +358,7 @@ class SupabaseClient:
             logger.error(f"Error getting institutions without embeddings: {str(e)}", exc_info=True)
             return []
 
-    async def batch_upsert_countries(self, countries: List[Dict[str, Any]]) -> Dict[int, int]:
+    def batch_upsert_countries(self, countries: List[Dict[str, Any]]) -> Dict[int, int]:
         """Batch upsert countries and return mapping of country_code -> id."""
         if self.use_mock:
             return {c.get("code"): c.get("code") for c in countries}
@@ -373,25 +373,34 @@ class SupabaseClient:
                 for c in countries
             ]
 
+            logger.info(f"Upserting {len(country_records)} country records to Supabase...")
+            logger.info(f"Sample country record: {country_records[0] if country_records else 'empty'}")
+            
             response = self.client.table("countries").upsert(
                 country_records,
                 on_conflict="iso_alpha2"
             ).execute()
+
+            logger.info(f"Upsert response status: {response}")
+            logger.info(f"Response data type: {type(response.data)}, length: {len(response.data) if response.data else 0}")
 
             # Build mapping of code -> id
             country_code_to_id = {}
             if response.data:
                 for item in response.data:
                     country_code_to_id[item.get("code")] = item.get("id")
+                logger.info(f"Successfully upserted {len(country_code_to_id)} countries")
+            else:
+                logger.warning(f"Country upsert returned no data. Full response: {response}")
             
-            logger.info(f"Batch saved {len(country_code_to_id)} countries")
+            logger.info(f"Returning country mapping with {len(country_code_to_id)} entries")
             return country_code_to_id
 
         except Exception as e:
-            logger.error(f"Error batch upserting countries: {str(e)}")
+            logger.error(f"Error batch upserting countries: {str(e)}", exc_info=True)
             return {}
 
-    async def batch_upsert_clarisa_institutions(
+    def batch_upsert_clarisa_institutions(
         self,
         institutions_data: List[Dict[str, Any]]
     ) -> List[int]:
@@ -412,24 +421,33 @@ class SupabaseClient:
                 for inst in institutions_data
             ]
 
+            logger.info(f"Upserting {len(institution_records)} institution records to Supabase...")
+            logger.info(f"Sample institution: {institution_records[0] if institution_records else 'empty'}")
+            
             response = self.client.table("clarisa_institutions").upsert(
                 institution_records,
                 on_conflict="clarisa_id"
             ).execute()
 
+            logger.info(f"Upsert response status: {response}")
+            logger.info(f"Response data type: {type(response.data)}, length: {len(response.data) if response.data else 0}")
+
             # Extract IDs
             saved_ids = []
             if response.data:
                 saved_ids = [item.get("id") for item in response.data if item.get("id")]
+                logger.info(f"Successfully upserted {len(saved_ids)} institutions")
+            else:
+                logger.warning(f"Upsert returned no data. Full response: {response}")
             
             logger.info(f"Batch saved {len(saved_ids)} institutions")
             return saved_ids
 
         except Exception as e:
-            logger.error(f"Error batch upserting institutions: {str(e)}")
+            logger.error(f"Error batch upserting institutions: {str(e)}", exc_info=True)
             return []
 
-    async def get_existing_clarisa_ids(self) -> set:
+    def get_existing_clarisa_ids(self) -> set:
         """Get set of existing clarisa_ids for smart filtering."""
         if self.use_mock:
             return set()
@@ -441,7 +459,7 @@ class SupabaseClient:
             logger.error(f"Error getting existing clarisa_ids: {str(e)}")
             return set()
 
-    async def batch_upsert_embeddings(
+    def batch_upsert_embeddings(
         self,
         embeddings_data: List[Dict[str, Any]],
         embeddings_service
@@ -456,7 +474,7 @@ class SupabaseClient:
             
             for i, emb_data in enumerate(embeddings_data):
                 try:
-                    embedding_vector = await embeddings_service.generate_embedding(
+                    embedding_vector = embeddings_service.generate_embedding(
                         emb_data["embedding_text"]
                     )
                     
@@ -488,7 +506,8 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error batch upserting embeddings: {str(e)}")
             return 0
-    async def save_analysis_records(
+
+    def save_analysis_records(
         self,
         file_id: str,
         filename: str,
@@ -532,7 +551,7 @@ class SupabaseClient:
             logger.error(f"Error saving analysis records: {str(e)}", exc_info=True)
             return False
 
-    async def get_analysis_list(self) -> List[Dict[str, Any]]:
+    def get_analysis_list(self) -> List[Dict[str, Any]]:
         """Get list of all analyses with summary info."""
         if self.use_mock:
             return []
@@ -561,7 +580,7 @@ class SupabaseClient:
             logger.error(f"Error getting analysis list: {str(e)}", exc_info=True)
             return []
 
-    async def get_analysis_details(self, file_id: str) -> Dict[str, Any]:
+    def get_analysis_details(self, file_id: str) -> Dict[str, Any]:
         """Get detailed analysis results for a specific file."""
         if self.use_mock:
             return {}

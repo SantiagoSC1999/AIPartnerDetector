@@ -104,14 +104,14 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
         audit_logger = get_audit_logger()
 
         # Log upload
-        await audit_logger.log_upload(file_id, file.filename, len(records))
+        audit_logger.log_upload(file_id, file.filename, len(records))
 
         # Initialize progress tracker
         progress = ProcessingProgress(len(records))
 
         # Get CLARISA institutions (use mock if Supabase not available)
         try:
-            clarisa_institutions = await supabase.get_clarisa_institutions()
+            clarisa_institutions = supabase.get_clarisa_institutions()
         except Exception as e:
             print(f"Could not fetch CLARISA institutions: {str(e)}, using mock data")
             clarisa_institutions = MOCK_CLARISA_INSTITUTIONS
@@ -147,7 +147,7 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
                 embedding_text = ", ".join(parts)
 
                 # Generate SINGLE embedding for uploaded institution (optimized for token cost)
-                uploaded_embedding = await embeddings_service.generate_embedding(embedding_text)
+                uploaded_embedding = embeddings_service.generate_embedding(embedding_text)
 
                 # Find best match in CLARISA institutions
                 best_match = None
@@ -215,7 +215,7 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
                     progress.potential_duplicates += 1
 
                 # Log decision
-                await audit_logger.log_duplicate_detection(
+                audit_logger.log_duplicate_detection(
                     file_id, row_id, record, matched_id, similarity, status.value, reason
                 )
 
@@ -236,7 +236,7 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
 
             except Exception as e:
                 progress.errors.append(f"Row {row_id}: {str(e)}")
-                await audit_logger.log_error(file_id, row_id, str(e))
+                audit_logger.log_error(file_id, row_id, str(e))
 
         # Prepare response
         response = {
@@ -247,7 +247,7 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
         }
 
         # Save analysis records to database for future retrieval
-        await supabase.save_analysis_records(
+        supabase.save_analysis_records(
             file_id=file_id,
             filename=file.filename or "unknown",
             total_records=len(records),
@@ -306,7 +306,7 @@ async def sync_clarisa_institutions():
         logger.info("Starting CLARISA sync...")
         
         # Log the sync action
-        await audit_logger.log_audit_action(
+        audit_logger.log_audit_action(
             action="sync_clarisa_started",
             entity_type="institution",
         )
@@ -317,7 +317,7 @@ async def sync_clarisa_institutions():
         logger.info(f"Sync completed with result: {result}")
         
         # Log completion
-        await audit_logger.log_audit_action(
+        audit_logger.log_audit_action(
             action="sync_clarisa_completed",
             entity_type="institution",
             details=result,
@@ -326,16 +326,21 @@ async def sync_clarisa_institutions():
         return {
             "status": result.get("status"),
             "total_fetched": result.get("total_fetched"),
+            "total_new": result.get("total_new"),
             "total_saved": result.get("total_saved"),
             "total_updated": result.get("total_updated"),
             "countries_synced": result.get("countries_synced"),
             "institution_types_synced": result.get("institution_types_synced"),
             "errors": result.get("errors", []),
+            "debug_info": {
+                "message": "Check backend logs if total_saved is 0 despite total_new > 0",
+                "mock_mode": not settings.SUPABASE_KEY,
+            }
         }
     except Exception as e:
         logger.error(f"Sync failed: {str(e)}", exc_info=True)
         
-        await audit_logger.log_audit_action(
+        audit_logger.log_audit_action(
             action="sync_clarisa_failed",
             entity_type="institution",
             details={"error": str(e)},
@@ -344,27 +349,34 @@ async def sync_clarisa_institutions():
 
 
 @router.get("/sync-status")
-async def get_sync_status():
+def get_sync_status():
     """
     Get the status of CLARISA sync.
     
     Returns:
-        JSON response with last sync information
+        JSON response with sync statistics and instructions
     """
     try:
         supabase = get_supabase_client()
         
         # Get count of institutions
-        institutions_count = await supabase.get_institutions_count()
-        countries_count = await supabase.get_countries_count()
-        embeddings_count = await supabase.get_embeddings_count()
+        institutions_count = supabase.get_institutions_count()
+        countries_count = supabase.get_countries_count()
+        embeddings_count = supabase.get_embeddings_count()
         
-        return {
+        response = {
             "institutions_count": institutions_count,
             "countries_count": countries_count,
             "embeddings_count": embeddings_count,
-            "last_sync": "N/A",  # Could be retrieved from audit logs
+            "last_sync": "N/A",
         }
+        
+        # Add helpful message if no data
+        if institutions_count == 0:
+            response["message"] = "No institutions synced yet. Use POST /institutions/sync-clarisa to sync from CLARISA API"
+            response["next_step"] = "POST /institutions/sync-clarisa"
+        
+        return response
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error": str(e)})
 
@@ -468,7 +480,7 @@ async def get_analysis_list():
     """
     try:
         supabase = get_supabase_client()
-        analyses = await supabase.get_analysis_list()
+        analyses = supabase.get_analysis_list()
         
         return {
             "total": len(analyses),
@@ -491,7 +503,7 @@ async def get_analysis_details(file_id: str):
     """
     try:
         supabase = get_supabase_client()
-        details = await supabase.get_analysis_details(file_id)
+        details = supabase.get_analysis_details(file_id)
         
         if "error" in details:
             raise HTTPException(status_code=404, detail=details)

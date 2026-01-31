@@ -74,7 +74,7 @@ class ClarisaSyncService:
 
             # Get existing clarisa_ids to skip re-processing
             logger.info("Checking existing institutions in database...")
-            existing_ids = await self.supabase.get_existing_clarisa_ids()
+            existing_ids = self.supabase.get_existing_clarisa_ids()
             logger.info(f"Found {len(existing_ids)} existing institutions")
 
             # Filter only NEW institutions (smart filtering)
@@ -100,7 +100,7 @@ class ClarisaSyncService:
 
             # BATCH save countries
             logger.info(f"Batch saving {len(countries_map)} countries...")
-            country_code_to_id = await self.supabase.batch_upsert_countries(list(countries_map.values()))
+            country_code_to_id = self.supabase.batch_upsert_countries(list(countries_map.values()))
             sync_result["countries_synced"] = len(country_code_to_id)
             logger.info(f"Batch saved {sync_result['countries_synced']} countries")
 
@@ -126,7 +126,7 @@ class ClarisaSyncService:
             # BATCH save institutions
             if institutions_to_save:
                 logger.info(f"Batch saving {len(institutions_to_save)} institutions...")
-                saved_ids = await self.supabase.batch_upsert_clarisa_institutions(institutions_to_save)
+                saved_ids = self.supabase.batch_upsert_clarisa_institutions(institutions_to_save)
                 sync_result["total_saved"] = len(saved_ids)
                 logger.info(f"Batch saved {sync_result['total_saved']} institutions")
 

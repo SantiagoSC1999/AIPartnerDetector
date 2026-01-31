@@ -16,7 +16,7 @@ class EmbeddingGenerationService:
         self.supabase = get_supabase_client()
         self.bedrock = get_embeddings_service()
 
-    async def generate_missing_embeddings(self) -> Dict[str, Any]:
+    def generate_missing_embeddings(self) -> Dict[str, Any]:
         """Generate embeddings for institutions that don't have them yet."""
         result = {
             "status": "in_progress",
@@ -29,7 +29,7 @@ class EmbeddingGenerationService:
             logger.info("Starting embedding generation for institutions without embeddings...")
             
             # Get institutions without embeddings
-            institutions = await self.supabase.get_institutions_without_embeddings()
+            institutions = self.supabase.get_institutions_without_embeddings()
             result["total_institutions"] = len(institutions)
             logger.info(f"Found {len(institutions)} institutions without embeddings")
 
@@ -45,13 +45,13 @@ class EmbeddingGenerationService:
                     embedding_text = self._build_embedding_text(institution)
                     
                     # Generate embedding vector
-                    embedding_vector = await self.bedrock.generate_embedding(embedding_text)
+                    embedding_vector = self.bedrock.generate_embedding(embedding_text)
                     
                     if embedding_vector:
                         # Save embedding using 'id' (the primary key) as institution_id
                         # This matches the foreign key constraint in institution_embeddings
                         inst_id = institution.get("id")
-                        await self.supabase.upsert_institution_embedding(
+                        self.supabase.upsert_institution_embedding(
                             institution_id=inst_id,  # Use local 'id' as the foreign key
                             embedding_text=embedding_text,
                             embedding_vector=embedding_vector,

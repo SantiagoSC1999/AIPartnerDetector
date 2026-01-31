@@ -33,7 +33,7 @@ class EmbeddingsService:
             embedding.append((val % 2000 - 1000) / 1000.0)
         return embedding
 
-    async def generate_embedding(self, text: str) -> Optional[List[float]]:
+    def generate_embedding(self, text: str) -> Optional[List[float]]:
         """Generate embedding for a single text."""
         if not text or not text.strip():
             return None
@@ -57,7 +57,7 @@ class EmbeddingsService:
             print(f"Error generating embedding: {str(e)}")
             return self._generate_mock_embedding(text)
 
-    async def generate_batch_embeddings(
+    def generate_batch_embeddings(
         self, texts: List[str], batch_size: Optional[int] = None
     ) -> List[Optional[List[float]]]:
         """Generate embeddings for multiple texts with batch rate limiting."""
@@ -71,7 +71,7 @@ class EmbeddingsService:
             batch_embeddings = []
 
             for text in batch:
-                embedding = await self.generate_embedding(text)
+                embedding = self.generate_embedding(text)
                 batch_embeddings.append(embedding)
 
             embeddings.extend(batch_embeddings)

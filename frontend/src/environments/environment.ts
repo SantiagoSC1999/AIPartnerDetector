@@ -1,7 +1,6 @@
 export const environment = {
   production: false,
   apiUrl: 'http://localhost:8000',
-  apiVersion: 'v1',
   appName: 'AI Partner Matching/Duplicate Detector',
   primaryColor: '#7ab800',
   maxFileSize: 10 * 1024 * 1024,

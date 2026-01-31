@@ -13,7 +13,7 @@ class AuditLogger:
         """Initialize audit logger."""
         self.logs = []
 
-    async def log_upload(self, file_id: str, filename: str, total_records: int) -> None:
+    def log_upload(self, file_id: str, filename: str, total_records: int) -> None:
         """Log file upload event."""
         log_entry = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -24,7 +24,7 @@ class AuditLogger:
         }
         self.logs.append(log_entry)
 
-    async def log_duplicate_detection(
+    def log_duplicate_detection(
         self,
         file_id: str,
         row_id: str,
@@ -48,7 +48,7 @@ class AuditLogger:
         }
         self.logs.append(log_entry)
 
-    async def log_error(self, file_id: str, row_id: str, error: str) -> None:
+    def log_error(self, file_id: str, row_id: str, error: str) -> None:
         """Log processing error."""
         log_entry = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -59,7 +59,7 @@ class AuditLogger:
         }
         self.logs.append(log_entry)
 
-    async def log_audit_action(
+    def log_audit_action(
         self, action: str, entity_type: str, entity_id: str = None, details: Dict[str, Any] = None
     ) -> None:
         """Log a generic audit action."""
@@ -73,11 +73,11 @@ class AuditLogger:
         }
         self.logs.append(log_entry)
 
-    async def export_logs(self) -> str:
+    def export_logs(self) -> str:
         """Export all logs as JSON string."""
         return json.dumps(self.logs, indent=2)
 
-    async def get_logs(self) -> list:
+    def get_logs(self) -> list:
         """Get all logs."""
         return self.logs.copy()
 
