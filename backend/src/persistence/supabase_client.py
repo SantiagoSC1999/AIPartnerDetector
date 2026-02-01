@@ -23,16 +23,35 @@ class SupabaseClient:
         
         if not self.use_mock and supabase:
             try:
+                logger.info(f"Attempting to connect to Supabase: {settings.SUPABASE_URL}")
+                
+                # Create client without proxy argument (not supported in all versions)
                 self.client = supabase.create_client(
                     settings.SUPABASE_URL,
                     settings.SUPABASE_KEY
                 )
-                logger.info("Supabase client initialized successfully")
+                
+                # Test connection with a simple query
+                test_response = self.client.table("clarisa_institutions").select("id").limit(1).execute()
+                logger.info("✅ Supabase client initialized successfully and connection tested")
+                
+            except TypeError as e:
+                if 'proxy' in str(e):
+                    logger.error(f"❌ Supabase version issue with proxy argument: {str(e)}")
+                    logger.info("Please upgrade supabase library or downgrade to compatible version")
+                else:
+                    logger.error(f"❌ Type error initializing Supabase: {str(e)}")
+                self.use_mock = True
+                self.client = None
+                
             except Exception as e:
-                logger.error(f"Error initializing Supabase: {str(e)}")
+                logger.error(f"❌ Error initializing Supabase: {str(e)}")
+                logger.error(f"Exception type: {type(e).__name__}")
                 self.use_mock = True
                 self.client = None
         else:
+            if self.use_mock:
+                logger.warning("⚠️ Using MOCK MODE - no Supabase connection")
             self.client = None
 
     def upsert_country(self, country_data: Dict[str, Any]) -> Optional[int]:
