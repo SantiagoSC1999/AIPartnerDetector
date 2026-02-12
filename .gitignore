@@ -49,12 +49,15 @@ test_create_duplicates.py
 test_api.py
 test_invalid.py
 test_embedding_format.py
+backend\test_colombian_institutions.xlsx
 
 # Copilot/Editor summaries
 *.copilot-summary
 COMPLETION_CHECKLIST.md
 FILE_LISTING.md
 LAUNCH_SUMMARY.md
+LAUNCH_VISUAL.txt
+EMPODERAMIENTO_SUMMARY.md
 
 # OS
 Thumbs.db

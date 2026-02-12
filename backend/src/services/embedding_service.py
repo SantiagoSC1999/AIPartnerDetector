@@ -38,11 +38,15 @@ class EmbeddingGenerationService:
                 logger.info("All institutions already have embeddings")
                 return result
 
+            # Debug: Log the first institution to see structure
+            logger.info(f"First institution structure: {institutions[0] if institutions else 'NONE'}")
+
             # Generate embeddings for each institution
             for idx, institution in enumerate(institutions):
                 try:
                     # Build embedding text with proper format
                     embedding_text = self._build_embedding_text(institution)
+                    logger.info(f"Institution {institution.get('clarisa_id')}: Generated embedding text: '{embedding_text}'")
                     
                     # Generate embedding vector
                     embedding_vector = self.bedrock.generate_embedding(embedding_text)
@@ -87,7 +91,7 @@ class EmbeddingGenerationService:
     def _build_embedding_text(self, institution: Dict[str, Any]) -> str:
         """Build text for embedding from institution data.
         
-        Format: acronym: {acronym}, Partner_name: {institution_name}, institution_type: {Institution_type_id}, website: {website}, country: {country_id}
+        Format: acronym: {acronym}, Partner_name: {institution_name}, institution_type: {institution_type}, website: {website}, country: {country_name}
         """
         parts = []
         
@@ -103,10 +107,25 @@ class EmbeddingGenerationService:
         if institution.get("website"):
             parts.append(f"website: {institution['website']}")
         
-        if institution.get("country_id"):
-            parts.append(f"country: {institution['country_id']}")
+        # Resolve country name - try country_name first, fall back to countries_map if needed
+        country_name = institution.get("country_name")
+        if not country_name and institution.get("country_id"):
+            # If country_name is not present, try to resolve from supabase
+            try:
+                countries_map = self.supabase.get_countries_map()
+                country_name = countries_map.get(institution.get("country_id"))
+                logger.debug(f"Resolved country_id {institution.get('country_id')} to: {country_name}")
+            except Exception as e:
+                logger.warning(f"Could not resolve country for {institution.get('clarisa_id')}: {str(e)}")
         
-        return ", ".join(parts) if parts else ""
+        if country_name:
+            parts.append(f"country: {country_name}")
+        else:
+            logger.warning(f"No country_name for institution {institution.get('clarisa_id')} (country_id: {institution.get('country_id')})")
+        
+        embedding_text = ", ".join(parts) if parts else ""
+        logger.debug(f"Built embedding text for {institution.get('clarisa_id')}: {embedding_text[:100]}...")
+        return embedding_text
 
 
 # Global instance

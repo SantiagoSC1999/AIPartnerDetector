@@ -12,3 +12,5 @@ uuid==1.30
 aiofiles==23.2.1
 requests==2.31.0
 httpx==0.25.2
+rapidfuzz==3.6.0
+lingua-language-detect==2.0.2

@@ -16,6 +16,7 @@ class ClarisaSyncService:
     def __init__(self):
         """Initialize the sync service."""
         self.clarisa_url = settings.CLARISA_API_URL
+        self.clarisa_countries_url = settings.CLARISA_COUNTRIES_API_URL
         self.supabase = get_supabase_client()
 
     async def fetch_clarisa_institutions(self) -> List[Dict[str, Any]]:
@@ -47,6 +48,207 @@ class ClarisaSyncService:
         except Exception as e:
             logger.error(f"Error fetching CLARISA institutions: {str(e)}", exc_info=True)
             return []
+
+    async def fetch_clarisa_countries(self) -> List[Dict[str, Any]]:
+        """Fetch countries from CLARISA API."""
+        try:
+            logger.info(f"Fetching countries from CLARISA: {self.clarisa_countries_url}")
+            
+            async with httpx.AsyncClient(verify=False) as client:
+                response = await client.get(
+                    self.clarisa_countries_url,
+                    timeout=60.0,
+                    headers={"User-Agent": "CLARISA-AI-Partners/1.0"}
+                )
+                logger.info(f"CLARISA countries response status: {response.status_code}")
+                
+                response.raise_for_status()
+                data = response.json()
+                
+                # CLARISA returns a list directly
+                if isinstance(data, list):
+                    logger.info(f"Got {len(data)} countries from CLARISA API")
+                    return data
+                else:
+                    logger.error(f"Unexpected CLARISA countries response format: {type(data)}")
+                    return []
+        except Exception as e:
+            logger.error(f"Error fetching CLARISA countries: {str(e)}", exc_info=True)
+            return []
+
+    async def delete_all_countries(self) -> Dict[str, Any]:
+        """Delete all countries from the database."""
+        logger.info("Deleting all countries...")
+        
+        result = {
+            "status": "in_progress",
+            "total_deleted": 0,
+            "errors": [],
+        }
+
+        try:
+            response = self.supabase.client.table("countries").delete().neq("id", -1).execute()
+            result["total_deleted"] = len(response.data) if response.data else 0
+            logger.info(f"Deleted {result['total_deleted']} countries")
+            result["status"] = "completed"
+        except Exception as e:
+            error_msg = f"Error deleting countries: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            result["errors"].append(error_msg)
+            result["status"] = "failed"
+
+        return result
+
+    async def delete_all_clarisa_institutions(self) -> Dict[str, Any]:
+        """Delete all CLARISA institutions from the database (respects ForeignKey constraints)."""
+        logger.info("Deleting all CLARISA institutions...")
+        
+        result = {
+            "status": "in_progress",
+            "total_deleted": 0,
+            "errors": [],
+        }
+
+        try:
+            response = self.supabase.client.table("clarisa_institutions").delete().neq("id", -1).execute()
+            result["total_deleted"] = len(response.data) if response.data else 0
+            logger.info(f"Deleted {result['total_deleted']} CLARISA institutions")
+            result["status"] = "completed"
+        except Exception as e:
+            error_msg = f"Error deleting CLARISA institutions: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            result["errors"].append(error_msg)
+            result["status"] = "failed"
+
+        return result
+
+    async def reset_all_data(self) -> Dict[str, Any]:
+        """Reset all CLARISA data: delete institutions first, then countries.
+        
+        This is a FULL RESET operation that allows you to start fresh.
+        """
+        logger.info("Starting full data reset...")
+        
+        result = {
+            "status": "in_progress",
+            "institutions_deleted": 0,
+            "countries_deleted": 0,
+            "errors": [],
+        }
+
+        try:
+            # Step 1: Delete institutions first (to avoid FK constraint violations)
+            logger.info("Step 1: Deleting all CLARISA institutions...")
+            inst_result = await self.delete_all_clarisa_institutions()
+            result["institutions_deleted"] = inst_result.get("total_deleted", 0)
+            if inst_result.get("status") == "failed":
+                result["errors"].extend(inst_result.get("errors", []))
+
+            # Step 2: Delete countries
+            logger.info("Step 2: Deleting all countries...")
+            country_result = await self.delete_all_countries()
+            result["countries_deleted"] = country_result.get("total_deleted", 0)
+            if country_result.get("status") == "failed":
+                result["errors"].extend(country_result.get("errors", []))
+
+            result["status"] = "completed" if not result["errors"] else "completed_with_errors"
+            logger.info(f"Data reset completed. Institutions deleted: {result['institutions_deleted']}, Countries deleted: {result['countries_deleted']}")
+
+        except Exception as e:
+            error_msg = f"Full data reset failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            result["errors"].append(error_msg)
+            result["status"] = "failed"
+
+        return result
+
+    async def delete_all_embeddings(self) -> Dict[str, Any]:
+        """Delete all embeddings from the database."""
+        logger.info("Deleting all embeddings...")
+        
+        result = {
+            "status": "in_progress",
+            "total_deleted": 0,
+            "errors": [],
+        }
+
+        try:
+            response = self.supabase.client.table("institution_embeddings").delete().neq("institution_id", -1).execute()
+            result["total_deleted"] = len(response.data) if response.data else 0
+            logger.info(f"Deleted {result['total_deleted']} embeddings")
+            result["status"] = "completed"
+        except Exception as e:
+            error_msg = f"Error deleting embeddings: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            result["errors"].append(error_msg)
+            result["status"] = "failed"
+
+        return result
+
+    async def sync_countries(self) -> Dict[str, Any]:
+        """Sync countries from CLARISA API to Supabase, using CLARISA 'code' as country ID.
+        
+        NOTE: This only INSERTS new countries. Use DELETE /institutions/delete-countries first if you want to replace all countries.
+        """
+        logger.info("Starting countries sync from CLARISA API...")
+        
+        sync_result = {
+            "status": "in_progress",
+            "total_fetched": 0,
+            "total_saved": 0,
+            "errors": [],
+        }
+
+        try:
+            # Fetch countries from CLARISA API
+            countries = await self.fetch_clarisa_countries()
+            sync_result["total_fetched"] = len(countries)
+            logger.info(f"Fetched {len(countries)} countries from CLARISA")
+
+            if not countries:
+                sync_result["status"] = "completed"
+                logger.info("No countries to sync")
+                return sync_result
+
+            # Prepare countries for batch insert with CLARISA 'code' as ID
+            country_records = []
+            for country in countries:
+                try:
+                    record = {
+                        "id": country.get("code"),  # Use CLARISA code as the country ID
+                        "code": country.get("code"),
+                        "iso_alpha2": country.get("isoAlpha2"),
+                        "name": country.get("name"),
+                    }
+                    country_records.append(record)
+                except Exception as e:
+                    logger.warning(f"Error preparing country record: {str(e)}")
+                    sync_result["errors"].append(str(e))
+
+            # Batch save countries
+            if country_records:
+                logger.info(f"Batch saving {len(country_records)} countries...")
+                try:
+                    response = self.supabase.client.table("countries").insert(
+                        country_records
+                    ).execute()
+                    sync_result["total_saved"] = len(response.data) if response.data else len(country_records)
+                    logger.info(f"Batch saved {sync_result['total_saved']} countries")
+                except Exception as e:
+                    error_msg = f"Error batch inserting countries: {str(e)}"
+                    logger.error(error_msg, exc_info=True)
+                    sync_result["errors"].append(error_msg)
+
+            sync_result["status"] = "completed"
+            logger.info(f"Countries sync completed. Saved: {sync_result['total_saved']}")
+
+        except Exception as e:
+            error_msg = f"Countries sync failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            sync_result["errors"].append(error_msg)
+            sync_result["status"] = "failed"
+
+        return sync_result
 
     async def sync_institutions(self) -> Dict[str, Any]:
         """Sync institutions from CLARISA to Supabase with smart filtering and batch operations."""
@@ -143,40 +345,6 @@ class ClarisaSyncService:
             sync_result["status"] = "failed"
 
         return sync_result
-
-    def _build_embedding_text(self, institution: Dict[str, Any]) -> str:
-        """Build text for embedding from institution data."""
-        parts = []
-        
-        if institution.get("name"):
-            parts.append(institution["name"])
-        
-        if institution.get("acronym"):
-            parts.append(institution["acronym"])
-        
-        if institution.get("institutionType") and institution["institutionType"].get("name"):
-            parts.append(institution["institutionType"]["name"])
-        
-        # Add headquarters country if available
-        if institution.get("countryOfficeDTO"):
-            for country in institution["countryOfficeDTO"]:
-                if country.get("isHeadquarter") == 1 and country.get("name"):
-                    parts.append(country["name"])
-                    break
-        
-        return " ".join(parts)
-
-
-# Global instance
-_sync_service: Optional[ClarisaSyncService] = None
-
-
-def get_clarisa_sync_service() -> ClarisaSyncService:
-    """Get or create ClarisaSyncService instance."""
-    global _sync_service
-    if _sync_service is None:
-        _sync_service = ClarisaSyncService()
-    return _sync_service
 
 
 # Global instance

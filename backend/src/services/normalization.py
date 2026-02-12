@@ -6,6 +6,20 @@ from typing import Optional
 from urllib.parse import urlparse
 
 
+# Common institution suffixes and prefixes to normalize
+INSTITUTION_SUFFIXES = [
+    r'\b(ltd|limited|inc|incorporated|llc|llp|lp|co\.|corp|corporation|sa|gmbh|ag|bv|nv)\b',
+    r'\b(foundation|institute|university|college|school|academy|center|centre|association|society|organization|bureau|agency|department|ministry|authority|board|service|office|division|branch)\b',
+    r'\b(and|&|plus)\s+(partners?|associates?|consultants?|enterprises?|solutions?)\b',
+]
+
+# Country and region suffixes
+LOCATION_SUFFIXES = [
+    r'-\s*\w+\s*$',  # Matches "-Bangladesh", "-Africa", "-Asia", etc.
+    r'\s*\(\s*\w+\s*\)\s*$',  # Matches "(Bangladesh)", "(Africa)", etc.
+]
+
+
 def normalize_text(text: Optional[str]) -> str:
     """Normalize text by lowercasing, trimming, and removing accents."""
     if not text:
@@ -22,6 +36,68 @@ def normalize_text(text: Optional[str]) -> str:
     text = re.sub(r"\s+", " ", text)
 
     return text
+
+
+def extract_core_name(text: Optional[str]) -> str:
+    """
+    Extract core institution name by removing common suffixes and location identifiers.
+    
+    This helps match "Plan International" with "Plan International-Bangladesh"
+    by extracting just "plan international" from both.
+    """
+    if not text:
+        return ""
+    
+    text = normalize_text(text)
+    
+    # Remove location suffixes like "-Bangladesh", "(USA)", etc.
+    for pattern in LOCATION_SUFFIXES:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    
+    # Remove common institutional suffixes
+    for pattern in INSTITUTION_SUFFIXES:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    
+    # Clean up extra whitespace and punctuation
+    text = re.sub(r"[\s\-,\.;:]+$", "", text)  # Remove trailing punctuation
+    text = re.sub(r"\s+", " ", text).strip()
+    
+    return text
+
+
+def get_name_variants(text: Optional[str]) -> list:
+    """
+    Generate name variants for fuzzy matching.
+    
+    Returns different representations of the same institution name
+    to improve matching in cases like "Plan International" variants.
+    """
+    if not text:
+        return []
+    
+    variants = set()
+    
+    # Add original normalized
+    normalized = normalize_text(text)
+    variants.add(normalized)
+    
+    # Add core name (without suffixes)
+    core = extract_core_name(text)
+    if core and core != normalized:
+        variants.add(core)
+    
+    # Add without special characters
+    no_special = re.sub(r"[^\w\s]", "", normalized)
+    if no_special and no_special != normalized:
+        variants.add(no_special)
+    
+    # Add abbreviated versions (first letter of each word)
+    words = normalized.split()
+    if len(words) > 1:
+        abbreviated = "".join(w[0] for w in words if w)
+        variants.add(abbreviated)
+    
+    return list(variants)
 
 
 def normalize_url(url: Optional[str]) -> str:

@@ -6,7 +6,6 @@ import uuid
 import json
 
 from src.services.excel_parser import parse_excel_file, ExcelParsingError
-from src.services.normalization import build_embedding_text, normalize_text
 from src.services.clarisa_sync_service import get_clarisa_sync_service
 from src.embeddings.bedrock_service import get_embeddings_service
 from src.duplicate_detection.detector import get_duplicate_detector, DuplicateStatus, DetectionSignals
@@ -103,6 +102,9 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
         supabase = get_supabase_client()
         audit_logger = get_audit_logger()
 
+        # Get countries mapping for resolving country names
+        countries_map = supabase.get_countries_map()
+
         # Log upload
         audit_logger.log_upload(file_id, file.filename, len(records))
 
@@ -125,12 +127,13 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
 
             try:
                 # Build embedding text with exact format:
-                # acronym: {acronym}, Partner_name: {institution_name}, institution_type: {Institution_type_id}, website: {website}, country: {country_id}
+                # acronym: {acronym}, Partner_name: {institution_name}, institution_type: {institution_type}, website: {website}, country: {country_name}
                 acronym = record.get("acronym", "")
                 partner_name = record.get("partner_name", "")
                 institution_type = record.get("institution_type", "")
-                website = record.get("web_page", "")  # Note: API uses web_page, DB might have website
+                website = record.get("web_page", "")  # Note: API uses web_page
                 country_id = record.get("country_id", "")
+                country_name = countries_map.get(int(country_id)) if country_id else None
                 
                 parts = []
                 if acronym:
@@ -141,8 +144,8 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
                     parts.append(f"institution_type: {institution_type}")
                 if website:
                     parts.append(f"website: {website}")
-                if country_id:
-                    parts.append(f"country: {country_id}")
+                if country_name:
+                    parts.append(f"country: {country_name}")
                 
                 embedding_text = ", ".join(parts)
 
@@ -157,43 +160,66 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
                     # Use pre-generated embedding from CLARISA database (no additional tokens)
                     clarisa_embedding = clarisa_record.get("embedding_vector")
                     
-                    # ===== RULE 1: Check for EXACT NAME MATCH (HIGHEST PRIORITY) =====
-                    # Compare ONLY institution names, ignore country/type/website
-                    if detector.check_exact_name_match(record, clarisa_record):
-                        # Exact name match = DUPLICATE
+                    # ===== STRATEGY 1: ADVANCED MULTI-STRATEGY MATCHING (for 10K+ variants) =====
+                    # This checks: exact, core name, fuzzy, acronym, keyword overlap
+                    advanced_result = detector.advanced_multi_strategy_match(record, clarisa_record)
+                    
+                    # No need for debug logging - the results will speak for themselves
+                    
+                    if advanced_result["match_type"] != "no_match":
+                        # Strong matches from advanced matching
                         signals = DetectionSignals()
-                        signals.exact_name_match = True
+                        
+                        if advanced_result["match_type"] == "exact":
+                            signals.exact_name_match = True
+                        elif advanced_result["match_type"] == "acronym":
+                            signals.acronym_similarity = advanced_result["confidence"]
+                        elif advanced_result["match_type"] == "fuzzy":
+                            signals.variant_name_match = True
+                        elif advanced_result["match_type"] == "keyword":
+                            signals.keyword_match_score = advanced_result["confidence"]
+                        
                         best_match = {
-                            "clarisa_id": clarisa_record.get("clarisa_id"),  # Use external clarisa_id
-                            "similarity": 1.0,
+                            "clarisa_id": clarisa_record.get("clarisa_id"),
+                            "similarity": advanced_result["confidence"],
                             "signals": signals,
+                            "explanation": advanced_result["explanation"],
+                            "match_type": advanced_result["match_type"],
                         }
-                        break  # Stop searching, this is the best possible match
+                        
+                        # For exact and acronym matches, stop searching
+                        if advanced_result["match_type"] in ["exact", "acronym"] and advanced_result["confidence"] >= 0.90:
+                            break
+                        
+                        # For fuzzy and keyword, continue to see if we find better
+                        if advanced_result["confidence"] > best_similarity:
+                            best_similarity = advanced_result["confidence"]
+                    
+                    # ===== STRATEGY 2: SEMANTIC SIMILARITY (fallback if advanced matching didn't find strong match) =====
+                    if (not best_match or best_match["similarity"] < 0.85):
+                        if uploaded_embedding and clarisa_embedding:
+                            combined_sim = embeddings_service.similarity_score(
+                                uploaded_embedding,
+                                clarisa_embedding
+                            )
+                        else:
+                            combined_sim = 0.0
 
-                    # ===== RULE 3: If no exact match, use SEMANTIC SIMILARITY on NAME ONLY =====
-                    if uploaded_embedding and clarisa_embedding:
-                        # Compare embeddings (which are based on FULL info but we use for name matching)
-                        combined_sim = embeddings_service.similarity_score(
-                            uploaded_embedding,
-                            clarisa_embedding
+                        # Check for semantic candidate
+                        rule_signals, is_candidate = detector.check_rule_based_signals(
+                            record, clarisa_record, combined_sim
                         )
-                    else:
-                        combined_sim = 0.0
-
-                    # ===== RULE 4-6: Check for possible semantic match =====
-                    rule_signals, is_candidate = detector.check_rule_based_signals(
-                        record, clarisa_record, combined_sim
-                    )
-
-                    # Track best candidate (Rule 4: these will be POSSIBLE_DUPLICATE, not DUPLICATE)
-                    if is_candidate and combined_sim > best_similarity:
-                        best_similarity = combined_sim
-                        rule_signals.semantic_combined_similarity = combined_sim
-                        best_match = {
-                            "clarisa_id": clarisa_record.get("clarisa_id"),  # Use external clarisa_id
-                            "similarity": combined_sim,
-                            "signals": rule_signals,
-                        }
+                        
+                        # Track best semantic candidate
+                        if is_candidate and combined_sim > best_similarity:
+                            best_similarity = combined_sim
+                            rule_signals.semantic_combined_similarity = combined_sim
+                            best_match = {
+                                "clarisa_id": clarisa_record.get("clarisa_id"),
+                                "similarity": combined_sim,
+                                "signals": rule_signals,
+                                "match_type": "semantic",
+                            }
 
                 # Classify record
                 if best_match and best_match["similarity"] > 0.0:
@@ -203,6 +229,8 @@ async def upload_and_detect_duplicates(file: UploadFile = File(...)):
                             "similarity_score": best_match["similarity"],
                             "matched_clarisa_id": best_match["clarisa_id"],
                             "signals": best_match["signals"],
+                            "match_type": best_match.get("match_type"),
+                            "explanation": best_match.get("explanation"),
                         },
                     )
                 else:
@@ -280,6 +308,189 @@ async def get_config():
         "duplicate_threshold": settings.DUPLICATE_THRESHOLD,
         "embedding_batch_size": settings.EMBEDDING_BATCH_SIZE,
     }
+
+
+@router.post("/sync-countries")
+async def sync_countries():
+    """
+    Sync countries from CLARISA API to Supabase.
+    
+    This endpoint:
+    - Fetches all countries from CLARISA API
+    - Uses CLARISA 'code' as the country ID (matching clarisa_institutions.country_id)
+    - Inserts them into the countries table
+    - Does NOT delete existing countries (use POST /delete-countries first if needed)
+    
+    Returns:
+        JSON response with sync statistics
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    audit_logger = get_audit_logger()
+    
+    try:
+        sync_service = get_clarisa_sync_service()
+        
+        logger.info("Starting CLARISA countries sync...")
+        
+        # Log the sync action
+        audit_logger.log_audit_action(
+            action="sync_countries_started",
+            entity_type="country",
+        )
+        
+        # Execute sync
+        result = await sync_service.sync_countries()
+        
+        logger.info(f"Countries sync completed with result: {result}")
+        
+        # Log completion
+        audit_logger.log_audit_action(
+            action="sync_countries_completed",
+            entity_type="country",
+            details=result,
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.delete("/reset-all-data")
+async def reset_all_data():
+    """
+    **DESTRUCTIVE OPERATION**: Reset all CLARISA data from scratch.
+    
+    This endpoint will:
+    1. Delete all CLARISA institutions
+    2. Delete all countries
+    
+    After this, you can run:
+    - POST /sync-countries (to import countries from CLARISA)
+    - POST /sync-clarisa (to import institutions from CLARISA)
+    - POST /generate-embeddings (to generate embeddings)
+    
+    **WARNING**: This cannot be undone. All CLARISA data will be erased.
+    
+    Returns:
+        JSON response with deletion statistics
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    audit_logger = get_audit_logger()
+    
+    try:
+        sync_service = get_clarisa_sync_service()
+        
+        logger.info("Starting full data reset...")
+        
+        # Log the dangerous action
+        audit_logger.log_audit_action(
+            action="reset_all_data_started",
+            entity_type="system",
+        )
+        
+        # Execute reset
+        result = await sync_service.reset_all_data()
+        
+        logger.info(f"Full data reset completed with result: {result}")
+        
+        # Log completion
+        audit_logger.log_audit_action(
+            action="reset_all_data_completed",
+            entity_type="system",
+            details=result,
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.delete("/delete-countries")
+async def delete_all_countries():
+    """
+    Delete ALL countries from the database.
+    
+    **WARNING**: This will delete all countries. 
+    After deleting, you must run POST /sync-countries to re-import from CLARISA.
+    
+    Returns:
+        JSON response with deletion statistics
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    audit_logger = get_audit_logger()
+    
+    try:
+        sync_service = get_clarisa_sync_service()
+        
+        logger.info("Starting countries deletion...")
+        
+        # Log the action
+        audit_logger.log_audit_action(
+            action="delete_countries_started",
+            entity_type="country",
+        )
+        
+        # Execute deletion
+        result = await sync_service.delete_all_countries()
+        
+        logger.info(f"Countries deletion completed with result: {result}")
+        
+        # Log completion
+        audit_logger.log_audit_action(
+            action="delete_countries_completed",
+            entity_type="country",
+            details=result,
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.delete("/delete-clarisa-institutions")
+async def delete_clarisa_institutions():
+    """
+    Delete ALL CLARISA institutions from the database.
+    
+    **WARNING**: This will delete all institutions.
+    After deleting, you must run POST /sync-clarisa to re-import from CLARISA.
+    
+    Returns:
+        JSON response with deletion statistics
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    audit_logger = get_audit_logger()
+    
+    try:
+        sync_service = get_clarisa_sync_service()
+        
+        logger.info("Starting CLARISA institutions deletion...")
+        
+        # Log the action
+        audit_logger.log_audit_action(
+            action="delete_clarisa_institutions_started",
+            entity_type="institution",
+        )
+        
+        # Execute deletion
+        result = await sync_service.delete_all_clarisa_institutions()
+        
+        logger.info(f"CLARISA institutions deletion completed with result: {result}")
+        
+        # Log completion
+        audit_logger.log_audit_action(
+            action="delete_clarisa_institutions_completed",
+            entity_type="institution",
+            details=result,
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": str(e)})
 
 
 @router.post("/sync-clarisa")
@@ -446,6 +657,49 @@ async def test_clarisa_api():
         })
 
 
+@router.delete("/delete-embeddings")
+async def delete_embeddings():
+    """
+    Delete ALL embeddings from the database.
+    
+    **WARNING**: This will delete all embeddings. 
+    After deleting, you must run POST /generate-embeddings to regenerate them.
+    
+    Returns:
+        JSON response with deletion statistics
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    audit_logger = get_audit_logger()
+    
+    try:
+        sync_service = get_clarisa_sync_service()
+        
+        logger.info("Starting embeddings deletion...")
+        
+        # Log the action
+        audit_logger.log_audit_action(
+            action="delete_embeddings_started",
+            entity_type="embedding",
+        )
+        
+        # Execute deletion
+        result = await sync_service.delete_all_embeddings()
+        
+        logger.info(f"Embeddings deletion completed with result: {result}")
+        
+        # Log completion
+        audit_logger.log_audit_action(
+            action="delete_embeddings_completed",
+            entity_type="embedding",
+            details=result,
+        )
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
 @router.post("/generate-embeddings")
 async def generate_embeddings():
     """
@@ -463,7 +717,7 @@ async def generate_embeddings():
         from src.services.embedding_service import get_embedding_generation_service
         
         embedding_service = get_embedding_generation_service()
-        result = await embedding_service.generate_missing_embeddings()
+        result = embedding_service.generate_missing_embeddings()
         
         return result
     except Exception as e:
@@ -513,3 +767,212 @@ async def get_analysis_details(file_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail={"error": str(e)})
+
+
+@router.post("/debug/test-single-embedding")
+async def test_single_embedding():
+    """
+    DEBUG: Generate embedding for a single institution and show exactly what's saved.
+    
+    This is for testing to ensure country_name is properly included in embeddings.
+    """
+    try:
+        supabase = get_supabase_client()
+        embedding_service = get_embeddings_service()
+        
+        # Get the embedding generation service which has _build_embedding_text
+        from src.services.embedding_service import get_embedding_generation_service
+        gen_service = get_embedding_generation_service()
+        
+        # Get ONE institution without embedding
+        institutions = supabase.get_institutions_without_embeddings()
+        
+        if not institutions:
+            return {
+                "status": "no_institutions",
+                "message": "All institutions already have embeddings or no institutions found"
+            }
+        
+        inst = institutions[0]
+        
+        # Show what we're working with
+        result = {
+            "institution_id": inst.get("id"),
+            "clarisa_id": inst.get("clarisa_id"),
+            "institution_raw": inst,
+            "country_id": inst.get("country_id"),
+            "country_name": inst.get("country_name"),
+            "embedding_text": "",
+            "embedding_generated": False,
+            "embedding_saved": False,
+            "error": None,
+        }
+        
+        # Build embedding text
+        embedding_text = gen_service._build_embedding_text(inst)
+        result["embedding_text"] = embedding_text
+        
+        if not embedding_text:
+            result["error"] = "Empty embedding text - country field likely missing"
+            return result
+        
+        # Check if country is in the text
+        if "country:" in embedding_text:
+            result["has_country_in_text"] = True
+        else:
+            result["has_country_in_text"] = False
+            result["warning"] = "❌ Country field NOT found in embedding text!"
+        
+        # Generate embedding vector
+        embedding_vector = embedding_service.generate_embedding(embedding_text)
+        result["embedding_generated"] = bool(embedding_vector)
+        
+        if not embedding_vector:
+            result["error"] = "Failed to generate embedding vector"
+            return result
+        
+        # Save to database
+        institution_id = inst.get("id")
+        supabase.upsert_institution_embedding(
+            institution_id=institution_id,
+            embedding_text=embedding_text,
+            embedding_vector=embedding_vector,
+        )
+        result["embedding_saved"] = True
+        
+        # Fetch it back to verify
+        saved_result = supabase.client.table("institution_embeddings").select(
+            "institution_id, embedding_text"
+        ).eq("institution_id", institution_id).execute()
+        
+        if saved_result.data:
+            saved_embedding = saved_result.data[0]
+            result["saved_to_db"] = {
+                "institution_id": saved_embedding.get("institution_id"),
+                "embedding_text_in_db": saved_embedding.get("embedding_text"),
+            }
+            
+            # Final verification
+            if "country:" in saved_embedding.get("embedding_text", ""):
+                result["status"] = "✅ SUCCESS - Country field IS in saved embedding"
+            else:
+                result["status"] = "❌ FAILED - Country field was NOT saved"
+        
+        return result
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+
+@router.post("/admin/update-country-ids")
+async def update_country_ids():
+    """
+    ADMIN: Update country_id in clarisa_institutions from CLARISA API.
+    
+    This fetches fresh data from CLARISA and updates the country_id field.
+    """
+    try:
+        from src.services.clarisa_sync_service import get_clarisa_sync_service
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        sync_service = get_clarisa_sync_service()
+        supabase = get_supabase_client()
+        
+        # Fetch fresh data from CLARISA
+        logger.info("Fetching fresh institution data from CLARISA...")
+        institutions = await sync_service.fetch_clarisa_institutions()
+        
+        if not institutions:
+            return {"status": "error", "message": "No institutions fetched from CLARISA"}
+        
+        # Check structure of first institution
+        sample = institutions[0] if institutions else {}
+        
+        result = {
+            "status": "completed",
+            "total_fetched": len(institutions),
+            "sample_institution_keys": list(sample.keys()),
+            "sample_institution": sample,
+            "updated": 0,
+            "errors": [],
+        }
+        
+        # Check if country_id exists in CLARISA records
+        has_country_id = any(inst.get("country_id") for inst in institutions[:100])
+        result["institutions_have_country_id"] = has_country_id
+        
+        if not has_country_id:
+            # Check for alternative country field names
+            sample_inst = institutions[0]
+            potential_country_fields = [k for k in sample_inst.keys() if 'country' in k.lower()]
+            result["potential_country_fields"] = potential_country_fields
+            
+            # Extract from countryOfficeDTO (headquarters)
+            if "countryOfficeDTO" in sample_inst and sample_inst["countryOfficeDTO"]:
+                logger.info("Found countryOfficeDTO in CLARISA. Extracting headquarters country...")
+                
+                for inst in institutions:
+                    try:
+                        clarisa_id = inst.get("code")
+                        country_offices = inst.get("countryOfficeDTO", [])
+                        
+                        if clarisa_id and country_offices:
+                            # Find headquarters country
+                            hq_country = None
+                            for office in country_offices:
+                                if office.get("isHeadquarter") == 1:
+                                    hq_country = office.get("code")
+                                    break
+                            
+                            # Fallback to first country if no HQ found
+                            if not hq_country and country_offices:
+                                hq_country = country_offices[0].get("code")
+                            
+                            if hq_country:
+                                supabase.client.table("clarisa_institutions").update({
+                                    "country_id": hq_country
+                                }).eq("clarisa_id", clarisa_id).execute()
+                                
+                                result["updated"] += 1
+                    except Exception as e:
+                        result["errors"].append(f"Error updating institution {inst.get('code')}: {str(e)}")
+                
+                result["message"] = f"Successfully extracted headquarters country from countryOfficeDTO"
+            else:
+                result["message"] = "CLARISA API does not appear to have country_id or countryOfficeDTO"
+            
+            return result
+        
+        # Update country_ids in database
+        logger.info(f"Updating {len(institutions)} institutions with country IDs...")
+        
+        for inst in institutions:
+            try:
+                clarisa_id = inst.get("id")
+                country_id = inst.get("country_id")
+                
+                if clarisa_id and country_id:
+                    supabase.client.table("clarisa_institutions").update({
+                        "country_id": country_id
+                    }).eq("clarisa_id", clarisa_id).execute()
+                    
+                    result["updated"] += 1
+            except Exception as e:
+                result["errors"].append(f"Error updating institution {inst.get('id')}: {str(e)}")
+        
+        logger.info(f"Updated {result['updated']} institutions")
+        return result
+        
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }

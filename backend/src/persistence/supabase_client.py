@@ -54,65 +54,6 @@ class SupabaseClient:
                 logger.warning("⚠️ Using MOCK MODE - no Supabase connection")
             self.client = None
 
-    def upsert_country(self, country_data: Dict[str, Any]) -> Optional[int]:
-        """Upsert a country into the countries table."""
-        if self.use_mock:
-            # Mock: return a deterministic ID based on country code
-            return country_data.get("code")
-
-        try:
-            country_record = {
-                "code": country_data.get("code"),
-                "iso_alpha2": country_data.get("isoAlpha2"),
-                "name": country_data.get("name"),
-            }
-
-            response = self.client.table("countries").upsert(
-                country_record,
-                on_conflict="iso_alpha2"
-            ).execute()
-
-            if response.data:
-                return response.data[0]["id"]
-            return None
-
-        except Exception as e:
-            logger.error(f"Error upserting country: {str(e)}")
-            return None
-
-    def upsert_clarisa_institution(
-        self,
-        institution_data: Dict[str, Any],
-        country_id: Optional[int] = None
-    ) -> Optional[int]:
-        """Upsert a CLARISA institution into the clarisa_institutions table."""
-        if self.use_mock:
-            # Mock: return a deterministic ID based on clarisa_id
-            return institution_data.get("code")
-
-        try:
-            institution_record = {
-                "clarisa_id": institution_data.get("code"),
-                "name": institution_data.get("name"),
-                "acronym": institution_data.get("acronym"),
-                "website": institution_data.get("websiteLink"),
-                "institution_type": institution_data.get("institutionType", {}).get("name"),
-                "country_id": country_id,
-            }
-
-            response = self.client.table("clarisa_institutions").upsert(
-                institution_record,
-                on_conflict="clarisa_id"
-            ).execute()
-
-            if response.data:
-                return response.data[0]["id"]
-            return None
-
-        except Exception as e:
-            logger.error(f"Error upserting institution: {str(e)}")
-            return None
-
     def upsert_institution_embedding(
         self,
         institution_id: int,
@@ -189,6 +130,19 @@ class SupabaseClient:
             logger.error(f"Error getting embeddings count: {str(e)}")
             return 0
 
+    def get_countries_map(self) -> Dict[int, str]:
+        """Get mapping of country_id -> country_name for resolving country names."""
+        if self.use_mock:
+            return {1: "Netherlands", 2: "United States", 3: "United Kingdom"}
+
+        try:
+            response = self.client.table("countries").select("id, name").execute()
+            countries = response.data or []
+            return {country["id"]: country["name"] for country in countries}
+        except Exception as e:
+            logger.error(f"Error getting countries map: {str(e)}")
+            return {}
+
     def get_clarisa_institutions(self) -> List[Dict[str, Any]]:
         """Get all CLARISA institutions WITH their pre-generated embeddings for duplicate detection.
         
@@ -255,14 +209,20 @@ class SupabaseClient:
             
             logger.info(f"Loaded {len(embedding_map)} embeddings for CLARISA institutions")
             
+            # Get country names mapping
+            countries_map = self.get_countries_map()
+            
             # Merge institutions with their embeddings, but only include those with embedding
             institutions = []
             for inst in all_institutions:
                 embedding = embedding_map.get(inst.get("id"))
                 if embedding is not None:
+                    # Try to get country name from join first, then fallback to countries_map
                     country_name = None
                     if inst.get("countries") and isinstance(inst["countries"], dict):
                         country_name = inst["countries"].get("name")
+                    elif inst.get("country_id") and countries_map:
+                        country_name = countries_map.get(inst.get("country_id"))
                     institutions.append({
                         "id": inst.get("id"),
                         "clarisa_id": inst.get("clarisa_id"),
@@ -343,19 +303,40 @@ class SupabaseClient:
             
             logger.info(f"Total embeddings fetched: {len(all_embeddings)}")
             
+            # Get country names mapping
+            countries_map = self.get_countries_map()
+            
             # Extract institution_ids that have embeddings (stored as local 'id' values)
             inst_ids_with_embeddings = {item["institution_id"] for item in all_embeddings}
             
             # Filter institutions without embeddings - use 'id' for matching (the primary key)
             institutions_without_embeddings = []
+            countries_found_in_join = 0
+            countries_found_in_map = 0
+            countries_not_found = 0
+            
             for inst in all_institutions:
                 institution_id = inst.get("id")  # Use the local 'id' primary key
                 
                 # Only add if this institution's id is NOT in embeddings
                 if institution_id and institution_id not in inst_ids_with_embeddings:
+                    # Try to get country name from join first, then fallback to countries_map
                     country_name = None
                     if inst.get("countries") and isinstance(inst["countries"], dict):
                         country_name = inst["countries"].get("name")
+                        if country_name:
+                            countries_found_in_join += 1
+                        logger.debug(f"Institution {institution_id}: Found country in join result: {country_name}")
+                    
+                    if not country_name and inst.get("country_id") and countries_map:
+                        country_name = countries_map.get(inst.get("country_id"))
+                        if country_name:
+                            countries_found_in_map += 1
+                        logger.debug(f"Institution {institution_id}: Resolved from map: country_id={inst.get('country_id')} -> {country_name}")
+                    
+                    if not country_name:
+                        countries_not_found += 1
+                        logger.warning(f"Institution {institution_id}: No country resolved! countries_join={inst.get('countries')}, country_id={inst.get('country_id')}")
                     
                     institutions_without_embeddings.append({
                         "id": institution_id,  # This goes into institution_embeddings.institution_id
@@ -477,54 +458,6 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error getting existing clarisa_ids: {str(e)}")
             return set()
-
-    def batch_upsert_embeddings(
-        self,
-        embeddings_data: List[Dict[str, Any]],
-        embeddings_service
-    ) -> int:
-        """Batch upsert embeddings with vector generation."""
-        if self.use_mock:
-            return len(embeddings_data)
-
-        try:
-            # Generate all embeddings
-            embedding_records = []
-            
-            for i, emb_data in enumerate(embeddings_data):
-                try:
-                    embedding_vector = embeddings_service.generate_embedding(
-                        emb_data["embedding_text"]
-                    )
-                    
-                    if embedding_vector:
-                        embedding_records.append({
-                            "institution_id": emb_data["institution_id"],
-                            "embedding_text": emb_data["embedding_text"],
-                            "embedding_vector": embedding_vector,
-                        })
-                except Exception as e:
-                    logger.warning(f"Error generating embedding for {emb_data['institution_id']}: {str(e)}")
-                
-                if (i + 1) % 100 == 0:
-                    logger.info(f"Generated {i + 1}/{len(embeddings_data)} embeddings")
-
-            # Batch insert embeddings
-            if embedding_records:
-                response = self.client.table("institution_embeddings").upsert(
-                    embedding_records,
-                    on_conflict="institution_id"
-                ).execute()
-                
-                saved_count = len(response.data) if response.data else 0
-                logger.info(f"Batch saved {saved_count} embeddings")
-                return saved_count
-            
-            return 0
-
-        except Exception as e:
-            logger.error(f"Error batch upserting embeddings: {str(e)}")
-            return 0
 
     def save_analysis_records(
         self,

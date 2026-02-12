@@ -57,27 +57,6 @@ class EmbeddingsService:
             print(f"Error generating embedding: {str(e)}")
             return self._generate_mock_embedding(text)
 
-    def generate_batch_embeddings(
-        self, texts: List[str], batch_size: Optional[int] = None
-    ) -> List[Optional[List[float]]]:
-        """Generate embeddings for multiple texts with batch rate limiting."""
-        if batch_size is None:
-            batch_size = settings.EMBEDDING_BATCH_SIZE
-
-        embeddings = []
-
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            batch_embeddings = []
-
-            for text in batch:
-                embedding = self.generate_embedding(text)
-                batch_embeddings.append(embedding)
-
-            embeddings.extend(batch_embeddings)
-
-        return embeddings
-
     def similarity_score(
         self, embedding1: List[float], embedding2: List[float]
     ) -> float:

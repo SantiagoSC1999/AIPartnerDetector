@@ -26,6 +26,7 @@ class Settings:
     
     # CLARISA API
     CLARISA_API_URL = os.getenv("CLARISA_API_URL", "https://api.clarisa.cgiar.org/api/institutions")
+    CLARISA_COUNTRIES_API_URL = os.getenv("CLARISA_COUNTRIES_API_URL", "https://api.clarisa.cgiar.org/api/countries")
     
     # Thresholds for duplicate detection
     EXACT_MATCH_THRESHOLD = float(os.getenv("EXACT_MATCH_THRESHOLD", "1.0"))
